@@ -19,29 +19,23 @@ std::string GetExeDirectory() {
     return exeDir;
 }
 
-// Function to load DLL from Visual Studio build structure
+// Function to load DLL from current directory
 HMODULE LoadHookDLL(const std::string& baseDir) {
-    // 간단한 구조: Debug/Release만 구분 (플랫폼 무관)
-    // HookLoader.exe : Test/HookLoader/Debug(or Release)/
-    // HookDLL.dll : Test/HookDLL/Debug(or Release)/
-    const char* relativePaths[] = {
-        "..\\..\\HookDLL\\Debug\\HookDLL.dll",
-        "..\\..\\HookDLL\\Release\\HookDLL.dll"
-    };
+    // Visual Studio automatically copies the DLL to the same directory as the EXE
+    // So we can load it directly from the current directory
+    const char* dllName = "HookDLL.dll";
 
-    const char* configs[] = { "Debug", "Release" };
+    printf("[*] Loading DLL from current directory: %s\n", dllName);
 
-    for (int i = 0; i < 2; i++) {
-        std::string fullPath = baseDir + "\\" + relativePaths[i];
-        printf("[*] Trying %s: %s\n", configs[i], relativePaths[i]);
-
-        HMODULE hDll = LoadLibraryA(fullPath.c_str());
-        if (hDll) {
-            printf("[+] DLL loaded from %s build!\n", configs[i]);
-            printf("[+] Full path: %s\n", fullPath.c_str());
-            return hDll;
-        }
+    HMODULE hDll = LoadLibraryA(dllName);
+    if (hDll) {
+        printf("[+] DLL loaded successfully!\n");
+        printf("[+] DLL handle: 0x%p\n", hDll);
+        return hDll;
     }
+
+    printf("[-] Failed to load DLL. Error: %lu\n", GetLastError());
+    printf("[-] Make sure HookDLL.dll is in the same directory as HookLoader.exe\n");
     return NULL;
 }
 
@@ -61,20 +55,13 @@ int main() {
     std::string exeDir = GetExeDirectory();
     printf("[*] Executable directory: %s\n\n", exeDir.c_str());
 
-    // Step 1: Load the DLL from Visual Studio build structure
-    printf("[*] Loading HookDLL.dll...\n");
+    // Step 1: Load the DLL from current directory
     HMODULE hDll = LoadHookDLL(exeDir);
     if (!hDll) {
-        printf("\n[-] Failed to load HookDLL.dll. Error: %lu\n", GetLastError());
-        printf("[-] Expected locations:\n");
-        printf("    - ..\\..\\HookDLL\\Debug\\HookDLL.dll\n");
-        printf("    - ..\\..\\HookDLL\\Release\\HookDLL.dll\n\n");
-        printf("[-] Please ensure:\n");
-        printf("    1. HookDLL project is built in Visual Studio\n");
-        printf("    2. Output directory is set to: $(ProjectDir)$(Configuration)\\\n");
+        printf("\n[-] Cannot proceed without DLL.\n");
         return 1;
     }
-    printf("[+] DLL loaded successfully! Handle: 0x%p\n\n", hDll);
+    printf("\n");
 
     // Step 2: Get the address of the hook procedure
     printf("[*] Getting hook procedure address...\n");

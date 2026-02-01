@@ -21,22 +21,23 @@ std::string GetExeDirectory() {
 
 // Function to load DLL from Visual Studio build structure
 HMODULE LoadHookDLL(const std::string& baseDir) {
-    // HookLoader.exe : Test/HookLoader/x64/Debug(or Release)/
-    // HookDLL.dll : Test/HookDLL/x64/Debug(or Release)/
+    // 간단한 구조: Debug/Release만 구분 (플랫폼 무관)
+    // HookLoader.exe : Test/HookLoader/Debug(or Release)/
+    // HookDLL.dll : Test/HookDLL/Debug(or Release)/
     const char* relativePaths[] = {
-        "..\\..\\HookDLL\\x64\\Debug\\HookDLL.dll",    // Debug
-        "..\\..\\HookDLL\\x64\\Release\\HookDLL.dll"   // Release
+        "..\\..\\HookDLL\\Debug\\HookDLL.dll",
+        "..\\..\\HookDLL\\Release\\HookDLL.dll"
     };
 
-    const char* buildConfigs[] = { "Debug", "Release" };
+    const char* configs[] = { "Debug", "Release" };
 
     for (int i = 0; i < 2; i++) {
         std::string fullPath = baseDir + "\\" + relativePaths[i];
-        printf("[*] Trying %s build: %s\n", buildConfigs[i], relativePaths[i]);
+        printf("[*] Trying %s: %s\n", configs[i], relativePaths[i]);
 
         HMODULE hDll = LoadLibraryA(fullPath.c_str());
         if (hDll) {
-            printf("[+] DLL loaded from %s build!\n", buildConfigs[i]);
+            printf("[+] DLL loaded from %s build!\n", configs[i]);
             printf("[+] Full path: %s\n", fullPath.c_str());
             return hDll;
         }
@@ -61,14 +62,16 @@ int main() {
     printf("[*] Executable directory: %s\n\n", exeDir.c_str());
 
     // Step 1: Load the DLL from Visual Studio build structure
-    printf("[*] Loading HookDLL.dll from Visual Studio build structure...\n");
+    printf("[*] Loading HookDLL.dll...\n");
     HMODULE hDll = LoadHookDLL(exeDir);
     if (!hDll) {
         printf("\n[-] Failed to load HookDLL.dll. Error: %lu\n", GetLastError());
         printf("[-] Expected locations:\n");
-        printf("    - ..\\..\\HookDLL\\x64\\Debug\\HookDLL.dll\n");
-        printf("    - ..\\..\\HookDLL\\x64\\Release\\HookDLL.dll\n\n");
-        printf("[-] Please build HookDLL project in Visual Studio first.\n");
+        printf("    - ..\\..\\HookDLL\\Debug\\HookDLL.dll\n");
+        printf("    - ..\\..\\HookDLL\\Release\\HookDLL.dll\n\n");
+        printf("[-] Please ensure:\n");
+        printf("    1. HookDLL project is built in Visual Studio\n");
+        printf("    2. Output directory is set to: $(ProjectDir)$(Configuration)\\\n");
         return 1;
     }
     printf("[+] DLL loaded successfully! Handle: 0x%p\n\n", hDll);

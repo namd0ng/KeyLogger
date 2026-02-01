@@ -51,24 +51,34 @@ project-root/
 1. Visual Studio 실행
 2. "새 프로젝트 만들기" → "빈 프로젝트" 선택
 3. 프로젝트 이름: `HookDLL`
-4. 프로젝트 속성 설정:
-   - 구성: `모든 구성`
-   - `구성 속성` → `일반` → `구성 형식`: **동적 라이브러리(.dll)**
+4. **중요: 출력 디렉터리 설정**
+   - 프로젝트 우클릭 → 속성
+   - 구성: `모든 구성`, 플랫폼: `모든 플랫폼`
+   - `구성 속성` → `일반`:
+     - `구성 형식`: **동적 라이브러리(.dll)**
+     - `출력 디렉터리`: `$(ProjectDir)$(Configuration)\`
+     - `중간 디렉터리`: `$(Configuration)\Intermediate\`
 5. `Test/HookDLL/dllmain.cpp` 파일을 프로젝트에 추가
 6. 빌드: `Ctrl+Shift+B`
-7. 출력: `x64/Debug/HookDLL.dll` 또는 `x64/Release/HookDLL.dll`
+7. 출력: `Test/HookDLL/Debug/HookDLL.dll` 또는 `Release/HookDLL.dll`
 
 #### 2. HookLoader 빌드 (Hook Loader 프로젝트)
 1. Visual Studio 실행
 2. "새 프로젝트 만들기" → "빈 프로젝트" 선택
 3. 프로젝트 이름: `HookLoader`
-4. 프로젝트 속성 설정:
-   - 구성: `모든 구성`
-   - `구성 속성` → `일반` → `구성 형식`: **응용 프로그램(.exe)**
-   - `구성 속성` → `고급` → `문자 집합`: **멀티바이트 문자 집합 사용**
+4. **중요: 출력 디렉터리 설정**
+   - 프로젝트 우클릭 → 속성
+   - 구성: `모든 구성`, 플랫폼: `모든 플랫폼`
+   - `구성 속성` → `일반`:
+     - `구성 형식`: **응용 프로그램(.exe)**
+     - `문자 집합`: **멀티바이트 문자 집합 사용**
+     - `출력 디렉터리`: `$(ProjectDir)$(Configuration)\`
+     - `중간 디렉터리`: `$(Configuration)\Intermediate\`
 5. `Test/HookLoader/main.cpp` 파일을 프로젝트에 추가
 6. 빌드: `Ctrl+Shift+B`
-7. 출력: `x64/Debug/HookLoader.exe` 또는 `x64/Release/HookLoader.exe`
+7. 출력: `Test/HookLoader/Debug/HookLoader.exe` 또는 `Release/HookLoader.exe`
+
+> **💡 플랫폼 독립적 빌드**: 위 설정을 사용하면 x64, ARM64 등 모든 플랫폼에서 동일한 경로에 빌드됩니다.
 
 ### 빌드 순서
 1. 먼저 **HookDLL** 프로젝트를 빌드하여 `HookDLL.dll` 생성
@@ -81,9 +91,11 @@ project-root/
 HookLoader.exe
 ```
 
-HookLoader는 Visual Studio 빌드 구조를 기반으로 자동으로 HookDLL.dll을 찾습니다:
-- **Debug 빌드**: `../../HookDLL/x64/Debug/HookDLL.dll`
-- **Release 빌드**: `../../HookDLL/x64/Release/HookDLL.dll`
+HookLoader는 프로젝트 구조를 기반으로 자동으로 HookDLL.dll을 찾습니다:
+- **Debug 빌드**: `../../HookDLL/Debug/HookDLL.dll`
+- **Release 빌드**: `../../HookDLL/Release/HookDLL.dll`
+
+> **🔧 플랫폼 지원**: 이 구조는 x64, ARM64, Win32 모든 플랫폼에서 동일하게 작동합니다.
 
 **예상 동작:**
 1. HookLoader.exe 실행 (인자 없이)
@@ -107,16 +119,15 @@ HookLoader는 Visual Studio 빌드 구조를 기반으로 자동으로 HookDLL.d
 > HookLoader.exe
 ======================================
   Hook-Based DLL Injection Test
-  Educational Purpose Only
 ======================================
 
 [*] Build Configuration: Debug
-[*] Executable directory: C:\Users\User\KeyLogger\Test\HookLoader\x64\Debug
+[*] Executable directory: C:\Users\User\KeyLogger\Test\HookLoader\Debug
 
-[*] Loading HookDLL.dll from Visual Studio build structure...
-[*] Trying Debug build: ..\..\HookDLL\x64\Debug\HookDLL.dll
+[*] Loading HookDLL.dll...
+[*] Trying Debug: ..\..\HookDLL\Debug\HookDLL.dll
 [+] DLL loaded from Debug build!
-[+] Full path: C:\Users\User\KeyLogger\Test\HookDLL\x64\Debug\HookDLL.dll
+[+] Full path: C:\Users\User\KeyLogger\Test\HookDLL\Debug\HookDLL.dll
 [+] DLL loaded successfully! Handle: 0x00007FF8XXXXXXXX
 
 [*] Getting hook procedure address...
@@ -203,9 +214,11 @@ HookLoader는 Visual Studio 빌드 구조를 기반으로 자동으로 HookDLL.d
 - **해결**:
   - Visual Studio에서 HookDLL 프로젝트를 먼저 빌드했는지 확인
   - 빌드 구성이 일치하는지 확인 (Debug/Release)
+  - **출력 디렉터리 설정 확인**:
+    - 프로젝트 속성 → 일반 → 출력 디렉터리: `$(ProjectDir)$(Configuration)\`
   - 예상 경로 확인:
-    - `Test/HookDLL/x64/Debug/HookDLL.dll` (Debug 빌드)
-    - `Test/HookDLL/x64/Release/HookDLL.dll` (Release 빌드)
+    - `Test/HookDLL/Debug/HookDLL.dll` (Debug 빌드)
+    - `Test/HookDLL/Release/HookDLL.dll` (Release 빌드)
 
 ### 훅이 설치되지 않음 (SetWindowsHookEx 실패)
 - **원인**: 권한 부족 또는 Hook procedure export 실패

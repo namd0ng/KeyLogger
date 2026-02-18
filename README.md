@@ -1,7 +1,7 @@
-# Hook-Based DLL Injection Learning Project
+# CreateRemoteThread DLL Injection Learning Project
 
 ## 프로젝트 개요
-이 프로젝트는 **교육 목적**으로 `SetWindowsHookEx()`를 이용한 Hook 기반 DLL Injection 기법을 학습하기 위한 예제입니다.
+이 프로젝트는 **교육 목적**으로 `CreateRemoteThread()`를 이용한 DLL Injection 기법을 학습하기 위한 예제입니다.
 Red Team/모의해킹 교육 및 Windows 내부 동작 원리 학습을 위해 제작되었습니다.
 
 ⚠️ **경고**: 이 코드는 교육 목적으로만 사용되어야 하며, 승인받지 않은 시스템에 대한 무단 침투 행위는 불법입니다.
@@ -9,243 +9,185 @@ Red Team/모의해킹 교육 및 Windows 내부 동작 원리 학습을 위해 �
 ## 프로젝트 구성
 
 ```
-project-root/
-├── Test/
-│   ├── HookLoader/         # Hook 기반 DLL 주입 (SetWindowsHookEx)
-│   │   └── main.cpp
-│   └── HookDLL/            # Hook Procedure를 포함한 DLL
-│       └── dllmain.cpp
-├── LICENSE                 # MIT License
-└── README.md
+Main/
+├── Common/
+│   └── constants.h         # 공유 상수 (대상 프로세스, DLL 이름, C2 설정 등)
+├── Injector/               # injector.exe - DLL을 대상 프로세스에 주입
+│   ├── main.cpp            # 메인 진입점 (4단계 플로우)
+│   ├── injection.cpp       # CreateRemoteThread 주입 로직
+│   ├── persistence.cpp     # 레지스트리 지속성 설정
+│   └── process_utils.cpp   # 프로세스 탐색, 아키텍처 검증
+└── Payload/                # payload_*.dll - 주입될 키로거 DLL
+    ├── dllmain.cpp         # DLL 진입점 (키로거 스레드 & 네트워크 초기화)
+    ├── keylogger.cpp/h     # 키보드 폴링 기반 키로거
+    ├── logger.cpp/h        # 로그 파일 기록
+    └── network.cpp/h       # C2 서버 통신 (TCP)
 ```
 
-### HookLoader (Hook Injector)
-- `SetWindowsHookEx()`를 사용한 전역 훅 설치
-- DLL에서 export된 hook procedure를 시스템 전체에 설치
-- 메시지 루프를 통해 훅 유지
-- CTRL+C로 훅 해제 및 종료
+### Injector (injector.exe)
+대상 프로세스(`explorer.exe`)에 payload DLL을 주입하는 실행 파일입니다. 4단계로 동작합니다:
 
-### HookDLL (Hook Procedure DLL)
-- Keyboard hook procedure (`WH_KEYBOARD_LL`) export
-- 키 이벤트를 `C:\hook_log.txt`에 기록 (교육 목적)
-- `CallNextHookEx()`로 다음 훅 체인 호출
-- 전역 훅이므로 시스템 전체 키보드 이벤트 모니터링
+1. **[Phase 1/4] 지속성 설정**: 레지스트리 Run 키에 injector 경로를 등록 (`HKCU\...\Run` → `WindowsUpdate`)
+2. **[Phase 2/4] 대상 프로세스 탐색**: `CreateToolhelp32Snapshot()`으로 `explorer.exe`의 PID 탐색
+3. **[Phase 3/4] 중복 주입 방지**: `TH32CS_SNAPMODULE`로 DLL이 이미 로드되었는지 확인
+4. **[Phase 4/4] DLL 주입**: `injection.cpp`의 `CreateRemoteThread` 기법으로 주입 수행
+
+`--uninstall` 플래그로 레지스트리 지속성을 제거할 수 있습니다.
+
+### Payload (payload_*.dll)
+주입된 후 `explorer.exe` 내부에서 실행되는 DLL입니다. `DllMain`의 `DLL_PROCESS_ATTACH`에서:
+- `InitNetwork()`: `config.ini`를 읽어 C2 서버에 TCP 연결, 송신 스레드 시작
+- `StartKeylogger()`: 키보드 폴링 스레드 시작 (`GetAsyncKeyState()`, 10ms 간격)
+
+키 입력 데이터는 C2 서버로 전송되며, 연결 실패 시 `%TEMP%\keylog_fallback.txt`에 기록됩니다.
 
 ## 기술 특징
 
-### Hook 기반 DLL Injection의 장점
-✅ **정상적인 Windows 메커니즘 활용**: OS가 자동으로 DLL을 각 프로세스에 주입
-✅ **CreateRemoteThread 불필요**: 수동 메모리 조작 없이 주입 가능
-✅ **합법적 사용 사례 존재**: IME, 접근성 도구, 디버거 등에서 사용
+### CreateRemoteThread DLL Injection의 주입 흐름
+`injection.cpp`에서 5단계로 구현됩니다:
 
-### Hook 기반 DLL Injection의 단점
-❌ **쉬운 탐지**: EDR/AV가 의심스러운 훅 활동을 모니터링
-❌ **메시지 루프 필수**: Hook을 유지하려면 프로세스가 계속 실행되어야 함
-❌ **권한 요구**: 시스템 전체 훅은 관리자 권한이 필요할 수 있음
+1. `OpenProcess(PROCESS_ALL_ACCESS, ...)` — 대상 프로세스 핸들 획득
+2. `VirtualAllocEx(...)` — 대상 프로세스 메모리에 DLL 경로 크기만큼 할당
+3. `WriteProcessMemory(...)` — 할당된 메모리에 DLL 절대 경로 문자열 기록
+4. `GetProcAddress(kernel32, "LoadLibraryA")` — Injector 자신의 주소 공간에서 `LoadLibraryA` 주소 획득
+5. `CreateRemoteThread(..., loadLibraryAddr, remoteMem, ...)` — 대상 프로세스에서 `LoadLibraryA(dllPath)` 실행
 
-## 빌드 방법
-
-### Visual Studio 사용
-
-#### 1. HookDLL 빌드 (Hook DLL 프로젝트)
-1. Visual Studio 실행
-2. "새 프로젝트 만들기" → "빈 프로젝트" 선택
-3. 프로젝트 이름: `HookDLL`
-4. **중요: 출력 디렉터리 설정**
-   - 프로젝트 우클릭 → 속성
-   - 구성: `모든 구성`, 플랫폼: `모든 플랫폼`
-   - `구성 속성` → `일반`:
-     - `구성 형식`: **동적 라이브러리(.dll)**
-     - `출력 디렉터리`: `$(ProjectDir)$(Configuration)\`
-     - `중간 디렉터리`: `$(Configuration)\Intermediate\`
-5. `Test/HookDLL/dllmain.cpp` 파일을 프로젝트에 추가
-6. 빌드: `Ctrl+Shift+B`
-7. 출력: `Test/HookDLL/Debug/HookDLL.dll` 또는 `Release/HookDLL.dll`
-
-#### 2. HookLoader 빌드 (Hook Loader 프로젝트)
-1. Visual Studio 실행
-2. "새 프로젝트 만들기" → "빈 프로젝트" 선택
-3. 프로젝트 이름: `HookLoader`
-4. **중요: 출력 디렉터리 설정**
-   - 프로젝트 우클릭 → 속성
-   - 구성: `모든 구성`, 플랫폼: `모든 플랫폼`
-   - `구성 속성` → `일반`:
-     - `구성 형식`: **응용 프로그램(.exe)**
-     - `문자 집합`: **멀티바이트 문자 집합 사용**
-     - `출력 디렉터리`: `$(ProjectDir)$(Configuration)\`
-     - `중간 디렉터리`: `$(Configuration)\Intermediate\`
-5. `Test/HookLoader/main.cpp` 파일을 프로젝트에 추가
-6. 빌드: `Ctrl+Shift+B`
-7. 출력: `Test/HookLoader/Debug/HookLoader.exe` 또는 `Release/HookLoader.exe`
-
-> **💡 플랫폼 독립적 빌드**: 위 설정을 사용하면 x64, ARM64 등 모든 플랫폼에서 동일한 경로에 빌드됩니다.
-
-### 빌드 순서
-1. 먼저 **HookDLL** 프로젝트를 빌드하여 `HookDLL.dll` 생성
-2. 그 다음 **HookLoader** 프로젝트를 빌드하여 `HookLoader.exe` 생성
+### CreateRemoteThread 방식의 특징
+✅ **명시적 제어**: 주입 대상 프로세스와 DLL을 직접 지정
+✅ **Hook 불필요**: `SetWindowsHookEx`와 달리 메시지 루프 없이 동작
+✅ **널리 연구됨**: 가장 대표적인 DLL Injection 기법, 방어 기법 이해에 필수
+❌ **쉬운 탐지**: EDR/AV가 `CreateRemoteThread` + `LoadLibrary` 패턴을 적극 모니터링
+❌ **아키텍처 일치 필수**: Injector, Payload DLL, 대상 프로세스가 모두 동일 아키텍처여야 함
+❌ **관리자 권한 필요**: `OpenProcess(PROCESS_ALL_ACCESS)`는 높은 권한을 요구
 
 ## 실행 방법
 
-**실행 (명령줄 인자 불필요):**
-```cmd
-HookLoader.exe
+### 사전 요구사항
+- **Windows** (x64, x86, ARM64 지원)
+- **관리자 권한** 으로 실행
+- Injector와 Payload DLL이 **같은 디렉터리**에 있어야 함
+
+### 파일 배치
+```
+your_directory/
+├── injector.exe        # Injector 실행 파일
+├── payload_x64.dll     # x64 아키텍처용 Payload (또는 payload_arm64.dll / payload_x86.dll)
+└── config.ini          # (선택) C2 서버 설정
 ```
 
-HookLoader는 프로젝트 구조를 기반으로 자동으로 HookDLL.dll을 찾습니다:
-- **Debug 빌드**: `../../HookDLL/Debug/HookDLL.dll`
-- **Release 빌드**: `../../HookDLL/Release/HookDLL.dll`
+> **아키텍처 주의**: `explorer.exe`가 x64이면 `injector.exe`와 `payload_x64.dll`을 사용해야 합니다.
+> 아키텍처 불일치 시 `CreateRemoteThread`가 실패합니다.
 
-> **🔧 플랫폼 지원**: 이 구조는 x64, ARM64, Win32 모든 플랫폼에서 동일하게 작동합니다.
+### config.ini (선택)
+C2 서버 설정이 없으면 기본값(`127.0.0.1:5555`)을 사용합니다.
+```ini
+[C2]
+ip=192.168.1.100
+port=5555
+```
 
-**예상 동작:**
-1. HookLoader.exe 실행 (인자 없이)
-2. Visual Studio 빌드 구조에서 자동으로 HookDLL.dll 탐색
-3. DLL이 로드되면 MessageBox 표시: "Hook DLL Loaded!"
-4. 시스템 전체 키보드 훅이 설치됨
-5. 키 이벤트가 `C:\hook_log.txt`에 기록됨
-6. CTRL+C 또는 창 종료 시 훅 해제 및 DLL 언로드
-7. 언로드 시 MessageBox 표시: "Hook DLL is being unloaded."
+### 실행
+```cmd
+# 관리자 권한 명령 프롬프트에서:
+injector.exe
 
-⚠️ **주의**: HookLoader는 시스템 전체 키보드 훅을 설치하므로 **관리자 권한**이 필요할 수 있습니다.
+# 제거 (레지스트리 지속성 삭제):
+injector.exe --uninstall
+```
 
 ### 안전한 테스트 방법
 1. **가상 머신 사용**: Windows VM에서 테스트 (VMware, VirtualBox, Hyper-V)
 2. **스냅샷 생성**: 테스트 전 VM 스냅샷 생성
-3. **로그 파일 확인**: `C:\hook_log.txt` 파일에서 이벤트 확인
-4. **종료 방법**: CTRL+C 또는 프로세스 종료로 훅 해제
+3. **로그 확인**: C2 서버 수신 데이터 또는 `%TEMP%\keylog_fallback.txt` 확인
+4. **제거**: `injector.exe --uninstall` 실행 후 `explorer.exe` 재시작
 
 ## 실행 예제
 ```
-> HookLoader.exe
+> injector.exe
 ======================================
-  Hook-Based DLL Injection Test
+  DLL Injection - Injector
 ======================================
 
-[*] Build Configuration: Debug
-[*] Executable directory: C:\Users\User\KeyLogger\Test\HookLoader\Debug
+[Phase 1/4] Setting up persistence
 
-[*] Loading HookDLL.dll...
-[*] Trying Debug: ..\..\HookDLL\Debug\HookDLL.dll
-[+] DLL loaded from Debug build!
-[+] Full path: C:\Users\User\KeyLogger\Test\HookDLL\Debug\HookDLL.dll
-[+] DLL loaded successfully! Handle: 0x00007FF8XXXXXXXX
+[*] Adding to startup registry...
+[*] Executable path: C:\Users\User\test\injector.exe
+[+] Successfully added to startup!
+[+] Registry Key: HKCU\Software\Microsoft\Windows\CurrentVersion\Run
+[+] Value Name: WindowsUpdate
 
-[*] Getting hook procedure address...
-[+] Hook procedure found at: 0x00007FF8XXXXXXXX
-[*] Installing keyboard hook (WH_KEYBOARD_LL)...
-[+] Hook installed successfully! Handle: 0x000000000XXXXXXX
-[+] Hook handle passed to DLL
+[Phase 2/4] Finding target process
+[+] Found explorer.exe (PID: 5432)
 
-[*] Hook is now active (system-wide)
-[*] Events will be logged to C:\hook_log.txt
-[*] Press CTRL+C or close this window to unhook and exit
+[Phase 3/4] Checking for existing injection
+[*] DLL not found in target process. Proceeding with injection.
 
-[키보드 입력 시 자동으로 로그 파일에 기록됨]
+[Phase 4/4] Preparing DLL injection
+[*] Expected DLL location: C:\Users\User\test\payload_x64.dll
+
+[*] Starting DLL injection into PID: 5432
+[*] DLL Path: C:\Users\User\test\payload_x64.dll
+[*] Step 1: Opening target process...
+[+] Process opened successfully. Handle: 0x00000000000000AC
+[*] Step 2: Allocating memory in target process...
+[+] Memory allocated at: 0x000001F3XXXXXXXX (Size: 41 bytes)
+[*] Step 3: Writing DLL path to target process memory...
+[+] DLL path written successfully (41 bytes)
+[*] Step 4: Getting LoadLibraryA address...
+[+] LoadLibraryA address: 0x00007FF8XXXXXXXX
+[*] Step 5: Creating remote thread to load DLL...
+[+] Remote thread created successfully. Handle: 0x00000000000000B0
+[*] Waiting for DLL to load...
+[+] DLL load thread completed
+[+] DLL loaded successfully! Module handle: 0x7FF8XXXXXXXX
+[*] Cleaning up...
+[+] DLL injection completed successfully!
+
+======================================
+[+] All tasks completed successfully!
+======================================
+
+[*] The payload is now running inside explorer.exe
+[*] Keystrokes will be logged to: C:\Users\User\AppData\Local\Temp\syslog.txt
+[*] This injector will now exit.
+[*] The payload will continue running in the background.
+
+[*] To uninstall: Run with --uninstall flag
+[*] To verify: Use Process Explorer to check DLLs in explorer.exe
 ```
 
 ## 학습 포인트
 
-### 1. DLL 로딩 메커니즘
-- `LoadLibraryA()`: DLL을 프로세스 주소 공간에 로드
-- `FreeLibrary()`: 로드된 DLL을 언로드
-- `HMODULE`: 로드된 모듈의 핸들
-- `GetProcAddress()`: DLL에서 export된 함수의 주소 가져오기
+### 1. CreateRemoteThread DLL Injection 원리
+- **왜 `LoadLibraryA` 주소를 Injector에서 구하는가?**
+  `kernel32.dll`은 모든 프로세스에서 동일한 주소에 매핑된다는 Windows의 ASLR 예외 덕분에, Injector 자신의 주소 공간에서 구한 `LoadLibraryA` 주소를 그대로 대상 프로세스에서 사용할 수 있습니다.
+- **왜 절대 경로가 필요한가?**
+  `CreateRemoteThread`로 호출되는 `LoadLibraryA`는 대상 프로세스의 컨텍스트에서 실행되므로, 상대 경로는 Injector 기준이 아닌 대상 프로세스 기준으로 해석됩니다.
 
-### 2. DllMain 함수
-- DLL의 진입점 함수
-- `DLL_PROCESS_ATTACH`: 프로세스가 DLL을 로드할 때
-- `DLL_PROCESS_DETACH`: 프로세스가 DLL을 언로드할 때
-- `DLL_THREAD_ATTACH/DETACH`: 스레드 생성/종료 시
+### 2. VirtualAllocEx / WriteProcessMemory
+- `VirtualAllocEx()`: 다른 프로세스의 가상 주소 공간에 메모리 할당
+- `WriteProcessMemory()`: 다른 프로세스의 메모리에 데이터 기록
+- 이 두 API는 프로세스 간 메모리 조작의 핵심으로, 다양한 인젝션 기법에서 활용됩니다.
 
-### 3. Windows Hook 메커니즘 (SetWindowsHookEx)
-- `SetWindowsHookEx()`: 시스템 이벤트를 가로채는 훅 설치
-- `WH_KEYBOARD_LL`: Low-level 키보드 훅 (시스템 전체)
-- `CallNextHookEx()`: 다음 훅 프로시저로 이벤트 전달
-- `UnhookWindowsHookEx()`: 훅 해제
-- **메시지 루프 필수**: 훅이 작동하려면 `GetMessage()` 루프 필요
-- **전역 훅**: DLL 핸들을 지정하면 시스템 전체에 DLL 주입됨
+### 3. DllMain 함수
+- DLL의 진입점으로, 로드/언로드 시점에 호출됩니다.
+- `DLL_PROCESS_ATTACH`: 주입 직후 실행 — 키로거 스레드와 네트워크 모듈을 초기화합니다.
+- `DLL_PROCESS_DETACH`: 언로드 시 — 스레드 종료 및 소켓 정리를 수행합니다.
+- `DllMain` 내부에서 수행 가능한 작업은 [Loader Lock](https://docs.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-best-practices) 제약으로 제한됩니다.
 
-### 4. Hook 기반 DLL Injection의 원리
-- **정상 메커니즘**: Windows가 전역 훅을 위해 DLL을 각 프로세스에 자동 주입
-- **차이점**: CreateRemoteThread 방식과 달리 Windows가 자동으로 처리
-- **활용**: 키보드/마우스 모니터링, 접근성 도구, IME(Input Method Editor)
-- **탐지**: EDR/안티바이러스가 의심스러운 훅 활동을 모니터링
+### 4. 아키텍처 호환성
+- `CreateRemoteThread`는 Injector와 대상 프로세스의 아키텍처가 일치해야 합니다.
+- `process_utils.cpp`의 `ValidateArchitectureMatch()`는 `IsWow64Process2()`(Win10 1709+)로 정확한 아키텍처를 확인하며, 구형 Windows에서는 `IsWow64Process()`로 폴백합니다.
 
-### 5. 응용 가능한 기법
-- **DLL Injection**: 다른 프로세스에 DLL을 주입하는 기법
-- **Code Injection**: 악성코드 분석 및 방어 기법 이해
-- **Hooking**: API 후킹 및 동작 변경
-- **Process Monitoring**: 시스템 활동 모니터링
+### 5. 지속성 (Registry Run Key)
+- `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`에 등록하면 로그인 시 자동 실행됩니다.
+- HKCU(현재 사용자)는 관리자 권한 없이도 쓰기 가능하다는 점이 특징입니다.
+- `--uninstall` 플래그로 `RegDeleteValueA()`를 호출해 제거합니다.
 
-## 다음 단계
-
-이 기본 예제를 이해한 후, 다음 주제를 학습할 수 있습니다:
-
-1. **SetWindowsHookEx를 이용한 Hook 기반 주입** ✅ (이미 구현됨 - HookLoader/HookDLL)
-   - 전역 훅을 통한 시스템 전체 DLL 주입
-   - 키보드/마우스 이벤트 모니터링
-   - 메시지 루프와 훅 체인 이해
-
-2. **CreateRemoteThread를 이용한 DLL Injection**
-   - 다른 프로세스의 메모리에 DLL 경로 작성
-   - 원격 스레드 생성으로 LoadLibrary 호출
-   - WriteProcessMemory와 VirtualAllocEx 활용
-
-3. **Process Hollowing**
-   - 정상 프로세스를 생성하고 메모리를 교체
-   - Process Injection의 고급 기법
-
-4. **Reflective DLL Injection**
-   - 파일 시스템을 거치지 않고 메모리에서 직접 DLL 로드
-   - 디스크 기반 탐지 우회
-
-5. **API Hooking**
-   - IAT/EAT 후킹
-   - Inline 후킹 (Detours, MinHook 등)
-
-6. **Hook 탐지 및 방어**
-   - 의심스러운 훅 탐지 도구 개발
-   - EDR 우회 기법 이해 (방어 관점)
-
-## 문제 해결 (Troubleshooting)
-
-### DLL 로드 실패
-- **원인**: HookDLL.dll을 찾을 수 없음
-- **해결**:
-  - Visual Studio에서 HookDLL 프로젝트를 먼저 빌드했는지 확인
-  - 빌드 구성이 일치하는지 확인 (Debug/Release)
-  - **출력 디렉터리 설정 확인**:
-    - 프로젝트 속성 → 일반 → 출력 디렉터리: `$(ProjectDir)$(Configuration)\`
-  - 예상 경로 확인:
-    - `Test/HookDLL/Debug/HookDLL.dll` (Debug 빌드)
-    - `Test/HookDLL/Release/HookDLL.dll` (Release 빌드)
-
-### 훅이 설치되지 않음 (SetWindowsHookEx 실패)
-- **원인**: 권한 부족 또는 Hook procedure export 실패
-- **해결**:
-  - 관리자 권한으로 실행
-  - DLL이 제대로 빌드되었는지 확인
-  - `GetLastError()`로 에러 코드 확인
-
-### 훅이 이벤트를 캡처하지 않음
-- **원인**: 메시지 루프가 실행되지 않음
-- **해결**:
-  - `GetMessage()` 루프가 정상 실행되는지 확인
-  - DLL의 hook procedure가 올바르게 export되었는지 확인 (Dependency Walker 사용)
-
-### 안티바이러스가 차단함
-- **원인**: 키로깅 동작으로 인식
-- **해결**:
-  - Windows Defender 실시간 보호 일시 비활성화 (VM 환경에서만)
-  - 빌드 출력 폴더를 제외 목록에 추가
-  - 코드 서명 (실제 애플리케이션 배포 시)
-
-### C:\hook_log.txt에 아무것도 기록되지 않음
-- **원인**: 파일 접근 권한 또는 hook procedure 미실행
-- **해결**:
-  - C:\ 드라이브에 쓰기 권한 확인
-  - 로그 경로를 사용자 폴더로 변경 (`C:\Users\<username>\hook_log.txt`)
-  - `fflush()` 호출로 버퍼 즉시 플러시
+### 6. 이중 주입 방지
+- `TH32CS_SNAPMODULE`로 대상 프로세스의 로드된 모듈 목록을 확인합니다.
+- 동일 DLL이 이미 로드되어 있으면 주입을 건너뜁니다.
+- 이는 실제 악성코드에서도 자주 사용하는 방어적 설계 패턴입니다.
 
 ## 주의사항
 
@@ -253,7 +195,7 @@ HookLoader는 프로젝트 구조를 기반으로 자동으로 HookDLL.dll을 �
 - 승인받지 않은 시스템에서 사용 시 법적 책임이 따를 수 있습니다.
 - 모의해킹 실습은 반드시 **격리된 환경**에서 진행하세요.
 - 안티바이러스 소프트웨어가 이 코드를 탐지할 수 있습니다.
-- **타인의 시스템에서 절대 실행하지 마세요** - 법적 처벌 대상입니다.
+- **타인의 시스템에서 절대 실행하지 마세요** — 법적 처벌 대상입니다.
 
 ## 라이선스
 
@@ -264,13 +206,15 @@ HookLoader는 프로젝트 구조를 기반으로 자동으로 HookDLL.dll을 �
 ## 참고 자료
 
 ### 공식 문서
-- [Microsoft Docs - SetWindowsHookEx](https://docs.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowshookexw)
-- [Microsoft Docs - Hooks Overview](https://docs.microsoft.com/en-us/windows/win32/winmsg/hooks)
+- [Microsoft Docs - CreateRemoteThread](https://docs.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createremotethread)
+- [Microsoft Docs - VirtualAllocEx](https://docs.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-virtualallocex)
+- [Microsoft Docs - WriteProcessMemory](https://docs.microsoft.com/en-us/windows/win32/api/memoryapi/nf-memoryapi-writeprocessmemory)
 - [Microsoft Docs - DllMain](https://docs.microsoft.com/en-us/windows/win32/dlls/dllmain)
-- [Microsoft Docs - Low-Level Keyboard Hook](https://docs.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc)
+- [Microsoft Docs - DLL Best Practices (Loader Lock)](https://docs.microsoft.com/en-us/windows/win32/dlls/dynamic-link-library-best-practices)
 
 ### 보안 프레임워크
-- [MITRE ATT&CK - T1055 (Process Injection)](https://attack.mitre.org/techniques/T1055/)
+- [MITRE ATT&CK - T1055.001 (Process Injection: DLL Injection)](https://attack.mitre.org/techniques/T1055/001/)
+- [MITRE ATT&CK - T1547.001 (Registry Run Keys / Startup Folder)](https://attack.mitre.org/techniques/T1547/001/)
 - [MITRE ATT&CK - T1056.001 (Input Capture: Keylogging)](https://attack.mitre.org/techniques/T1056/001/)
 
 ### 도서

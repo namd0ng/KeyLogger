@@ -5,6 +5,7 @@
 // Function declarations
 DWORD FindProcessByName(const char* processName);
 bool IsDLLAlreadyInjected(DWORD pid, const char* dllName);
+bool ValidateArchitectureMatch(DWORD targetPid);
 bool InjectDLL(DWORD pid, const char* dllPath);
 bool AddToStartup();
 bool RemoveFromStartup();

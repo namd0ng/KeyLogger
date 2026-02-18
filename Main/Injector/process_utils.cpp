@@ -4,7 +4,7 @@
 #include "../Common/constants.h"
 
 // Function pointer type for IsWow64Process2 (Win10 1709+)
-typedef BOOL (WINAPI *fnIsWow64Process2)(HANDLE, USHORT*, USHORT*)
+typedef BOOL (WINAPI *fnIsWow64Process2)(HANDLE, USHORT*, USHORT*);
 
 // Helper: convert narrow string to wide string for comparison
 static bool NarrowToWide(const char* narrow, wchar_t* wide, size_t wideSize) {

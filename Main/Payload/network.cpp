@@ -1,7 +1,7 @@
 #include <WinSock2.h>
 #include <WS2tcpip.h>
 #include <MSWSock.h>
-#include <mstcpip.h>   // tcp_keepalive, SIO_KEEPALIVE_VALS (ARM64에서 명시적 포함 필요)
+#include <mstcpip.h>   // tcp_keepalive, SIO_KEEPALIVE_VALS (explicit include required on ARM64)
 #include <Windows.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,7 +63,7 @@ bool InitNetwork(HMODULE hDllModule) {
     }
 
     // Seed random number generator for jitter calculation
-    srand((unsigned int)GetTickCount());
+    srand((unsigned int)(GetTickCount64() & 0xFFFFFFFF));
 
     // Read C2 server config from config.ini
     ReadConfig(hDllModule);

